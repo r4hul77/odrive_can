@@ -1,0 +1,11 @@
+odrive_can_node_0:
+  ros__parameters:
+    node_id: 0
+    control_mode: 0x2
+    input_mode: 0x2
+    velocity_limit: 20000.0
+    current_limit: 23.44
+    traj_vel_limit: 20000.0
+    traj_accel_limit: 2000.0
+    traj_decel_limit: 2000.0
+    traj_inertia: 200.0

@@ -1,0 +1,4 @@
+uint32 controller_mode
+uint32 input_mode
+---
+bool done
