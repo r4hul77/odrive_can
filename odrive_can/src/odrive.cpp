@@ -8,8 +8,6 @@ odrive_node::odrive_node(const rclcpp::NodeOptions & options):lc::LifecycleNode(
 void odrive_node::init(){
   get_parameters();
   initialize_publishers();
-  initialize_subscription();
-  timer_ = this->create_wall_timer(std::chrono::milliseconds(1000),std::bind(&odrive_node::sanity_checker,this));
   initialize_services();
 }
 
@@ -21,6 +19,14 @@ CallbackReturn odrive_node::on_configure(const lc::State & state){
 }
 
 CallbackReturn odrive_node::on_activate(const lc::State & state){
+  pub_enc_->on_activate();
+  pub_can_->on_activate();
+  pub_enc_->on_activate();
+  pub_iq_->on_activate();
+  pub_bus_->on_activate();
+  pub_temp_->on_activate();
+  timer_ = this->create_wall_timer(std::chrono::milliseconds(1000),std::bind(&odrive_node::sanity_checker,this));
+  initialize_subscription();
   get_version();
   initialize_controller();
   return CallbackReturn::SUCCESS;
@@ -156,21 +162,24 @@ void odrive_node::initialize_publishers(){
 void odrive_node::initialize_subscription(){
   // Create call back groups for sub_can and sub_target
   auto sub_can_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  auto sub_target_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  auto sub_target_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
   // Create sub_can and sub_target
   rclcpp::SubscriptionOptions sub_can_options;
   sub_can_options.callback_group = sub_can_callback_group;
   rclcpp::SubscriptionOptions sub_target_options;
   sub_target_options.callback_group = sub_target_callback_group;
-  sub_can_ = this->create_subscription<can_msgs::msg::Frame>("/from_can_bus",10,std::bind(&odrive_node::can_callback,this,std::placeholders::_1),sub_can_options);
-  sub_target_ = this->create_subscription<odrive_interfaces::msg::Target>(frame_id_ + "target",10,std::bind(&odrive_node::target_callback,this,std::placeholders::_1),sub_target_options);
+  sub_can_ = this->create_subscription<can_msgs::msg::Frame>("/from_can_bus",50,std::bind(&odrive_node::can_callback,this,std::placeholders::_1),sub_can_options);
+  sub_target_ = this->create_subscription<odrive_interfaces::msg::Target>(frame_id_ + "/target",50,std::bind(&odrive_node::target_callback,this,std::placeholders::_1),sub_target_options);
 }
 
 void odrive_node::target_callback(const odrive_interfaces::msg::Target::SharedPtr msg){
+set_controller_mode(ctrl_mode_,input_mode_);
+RCLCPP_ERROR(this->get_logger(), "pos %lf, vel %lf, torque %lf", msg->pos_des.data, msg->vel_des.data, msg->torque_des.data);
   pub_cmd(msg->pos_des.data*gear_ratio_/(2*M_PI), msg->vel_des.data*gear_ratio_/(2*M_PI), msg->torque_des.data/gear_ratio_);
 }
 
 void odrive_node::pub_cmd(float pos, float vel, float torque){
+  RCLCPP_ERROR(this->get_logger(), "pos %lf, vel %lf, torque %lf", pos, vel, torque);
   switch(ctrl_mode_){
     case CONTROL_MODE::POSITION_CONTROL:
       this->set_input_pos(pos,vel, torque);
@@ -201,14 +210,14 @@ void odrive_node::get_version_callback(const can_msgs::msg::Frame::SharedPtr msg
 }
 
 void odrive_node::get_version(){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Get_Version;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
   can_frame_.is_error = false;
   can_frame_.dlc = 0;
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
 
@@ -227,25 +236,25 @@ void odrive_node::heartbeat_callback(const can_msgs::msg::Frame::SharedPtr msg){
 }
 
 void odrive_node::get_heartbeat(){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
+
   can_frame_.id = node_id_ << 5 | CMD_IDS::Heartbeat;
   can_frame_.is_extended = false;
-  can_frame_.is_rtr = false;
+  can_frame_.is_rtr = true;
   can_frame_.is_error = false;
   can_frame_.dlc = 0;
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
 }
 
 void odrive_node::publish_estop(){
-  can_send_mtx.lock();
+
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Estop;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
   can_frame_.is_error = false;
   can_frame_.dlc = 0;
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
 }
 
 void odrive_node::get_error_callback(const can_msgs::msg::Frame::SharedPtr msg){
@@ -260,18 +269,18 @@ void odrive_node::get_error_callback(const can_msgs::msg::Frame::SharedPtr msg){
 }
 
 void odrive_node::get_error(){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
+
   can_frame_.id = node_id_ << 5 | CMD_IDS::Get_Error;
   can_frame_.is_extended = false;
-  can_frame_.is_rtr = false;
+  can_frame_.is_rtr = true;
   can_frame_.is_error = false;
   can_frame_.dlc = 0;
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
 }
 
 void odrive_node::set_axis_node_id(uint32_t& node_id){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Axis_Node_ID;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
@@ -279,20 +288,19 @@ void odrive_node::set_axis_node_id(uint32_t& node_id){
   can_frame_.dlc = 4;
   write_le<uint32_t>(node_id, can_frame_.data.begin());
   this->node_id_ = node_id;
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
 }
 
 void odrive_node::set_axis_state(AXIS_STATE& axis_state){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
+
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Axis_State;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
   can_frame_.is_error = false;
   can_frame_.dlc = 4;
   write_le<uint32_t>(axis_state, can_frame_.data.begin());
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
 }
 
 
@@ -309,14 +317,14 @@ void odrive_node::get_encoder_estimates_callback(const can_msgs::msg::Frame::Sha
 
 
 void odrive_node::get_encoder_estimates(){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Get_Encoder_Estimates;
   can_frame_.is_extended = false;
-  can_frame_.is_rtr = false;
+  can_frame_.is_rtr = true;
   can_frame_.is_error = false;
   can_frame_.dlc = 0;
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
 
@@ -379,7 +387,7 @@ bool odrive_node::set_controller_mode(CONTROL_MODE &ctrl_mode, INPUT_MODE &input
       RCLCPP_ERROR(this->get_logger(),"Invalid Controller Mode or Input Mode");
       return false;
   }
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   ctrl_mode_ = ctrl_mode;
   input_mode_ = input_mode;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Controller_Mode;
@@ -391,38 +399,37 @@ bool odrive_node::set_controller_mode(CONTROL_MODE &ctrl_mode, INPUT_MODE &input
   write_le<uint32_t>(placeholder, can_frame_.data.begin());
   placeholder = static_cast<uint32_t>(input_mode_);
   write_le<uint32_t>(placeholder, can_frame_.data.begin() + 4);
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
   return true;
 }
 
 void odrive_node::get_bus_voltage(){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Get_Bus_Voltage_Current;
   can_frame_.is_extended = false;
-  can_frame_.is_rtr = false;
+  can_frame_.is_rtr = true;
   can_frame_.is_error = false;
   can_frame_.dlc = 0;
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
 void odrive_node::set_input_pos(float &pos, float& vel_max, float& torque_max){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Input_Pos;
   can_frame_.is_extended = false;
-  can_frame_.is_rtr = false;
+  can_frame_.is_rtr = true;
   can_frame_.is_error = false;
   can_frame_.dlc = 8;
   write_le<float>(pos, can_frame_.data.begin());
   write_le<int16_t>(vel_max*1000, can_frame_.data.begin() + 4);
   write_le<int16_t>(torque_max*1000, can_frame_.data.begin() + 6);
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
 void odrive_node::set_input_vel(float & vel, float &torque_max){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Input_Vel;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
@@ -430,24 +437,24 @@ void odrive_node::set_input_vel(float & vel, float &torque_max){
   can_frame_.dlc = 8;
   write_le<float>(vel, can_frame_.data.begin());
   write_le<float>(torque_max, can_frame_.data.begin() + 4);
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
 void odrive_node::set_input_torque(float & torque){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Input_Torque;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
   can_frame_.is_error = false;
   can_frame_.dlc = 4;
   write_le<float>(torque, can_frame_.data.begin());
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
-void odrive_node::set_limits(float & vel_limit, float& curr_limit){
-  can_send_mtx.lock();
+void odrive_node::set_limits(float & vel_limit, float & curr_limit){
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Limits;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
@@ -455,25 +462,30 @@ void odrive_node::set_limits(float & vel_limit, float& curr_limit){
   can_frame_.dlc = 8;
   write_le<float>(vel_limit, can_frame_.data.begin());
   write_le<float>(curr_limit, can_frame_.data.begin() + 4);
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
+void odrive_node::set_limits_callback(const can_msgs::msg::Frame::SharedPtr msg){
+  float vel_limit_set = read_le<float>(msg->data.begin());
+  float curr_limit_set = read_le<float>(msg->data.begin()+4);
+  RCLCPP_ERROR(this->get_logger(), "vel limit: %f, curr limit %f", vel_limit_set, curr_limit_set);
+}
 
 void odrive_node::set_traj_vel_limit(float &traj_vel_limit){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Traj_Vel_Limit;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
   can_frame_.is_error = false;
   can_frame_.dlc = 4;
   write_le<float>(traj_vel_limit, can_frame_.data.begin());
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
 void odrive_node::set_traj_accel_limit(float &traj_accel_limit, float & traj_deaccel_limit){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Traj_Accel_Limits;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
@@ -481,21 +493,20 @@ void odrive_node::set_traj_accel_limit(float &traj_accel_limit, float & traj_dea
   can_frame_.dlc = 8;
   write_le<float>(traj_accel_limit, can_frame_.data.begin());
   write_le<float>(traj_deaccel_limit, can_frame_.data.begin() + 4);
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
 
 void odrive_node::set_traj_inertia(float & traj_inetria){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Traj_Inertia;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
   can_frame_.is_error = false;
   can_frame_.dlc = 4;
   write_le<float>(traj_inetria, can_frame_.data.begin());
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
 }
 
 void odrive_node::get_iq_callback(const can_msgs::msg::Frame::SharedPtr msg){
@@ -514,54 +525,54 @@ void odrive_node::get_temp_callback(const can_msgs::msg::Frame::SharedPtr msg){
 }
 
 bool odrive_node::reboot(){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Reboot;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
   can_frame_.is_error = false;
   can_frame_.dlc = 0;
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
   return true;
 }
 
 void odrive_node::clear_errors(){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Clear_Errors;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
   can_frame_.is_error = false;
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
 
 void odrive_node::set_abs_pos(float & abs_pos){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Absolute_Position;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
   can_frame_.is_error = false;
   can_frame_.dlc = 4;
   write_le<float>(abs_pos, can_frame_.data.begin());
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
 void odrive_node::set_pos_gain(float & pos_gain){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Pos_Gain;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
   can_frame_.is_error = false;
   can_frame_.dlc = 4;
   write_le<float>(pos_gain, can_frame_.data.begin());
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
 void odrive_node::set_vel_gain(float &vel_gain, float& vel_integrator_gain){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Vel_Gains;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = false;
@@ -569,8 +580,8 @@ void odrive_node::set_vel_gain(float &vel_gain, float& vel_integrator_gain){
   can_frame_.dlc =8;
   write_le<float>(vel_gain, can_frame_.data.begin());
   write_le<float>(vel_integrator_gain, can_frame_.data.begin() + 4);
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
 void odrive_node::get_torques_callback(const can_msgs::msg::Frame::SharedPtr msg){
@@ -581,14 +592,14 @@ void odrive_node::get_torques_callback(const can_msgs::msg::Frame::SharedPtr msg
 }
 
 void odrive_node::get_torques(){
-  can_send_mtx.lock();
+  can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Get_Torques;
   can_frame_.is_extended = false;
-  can_frame_.is_rtr = false;
+  can_frame_.is_rtr = true;
   can_frame_.is_error = false;
   can_frame_.dlc = 0;
-  pub_can_->publish(can_frame_);
-  can_send_mtx.unlock();
+  pub_can_->publish(std::move(can_frame_));
+
 }
 
 void odrive_node::get_controller_error_callback(const can_msgs::msg::Frame::SharedPtr msg){
@@ -609,14 +620,14 @@ void odrive_node::can_callback(const can_msgs::msg::Frame::SharedPtr msg){
     case CMD_IDS::Get_Error:
       this->get_error_callback(msg);
       break;
+    case CMD_IDS::Get_Iq:
+      this->get_iq_callback(msg);
+      break;
     case CMD_IDS::Get_Encoder_Estimates:
       this->get_encoder_estimates_callback(msg);
       break;
     case CMD_IDS::Get_Bus_Voltage_Current:
       this->get_bus_voltage_callback(msg);
-      break;
-    case CMD_IDS::Get_Iq:
-      this->get_iq_callback(msg);
       break;
     case CMD_IDS::Get_Temperature:
       this->get_temp_callback(msg);
@@ -631,7 +642,11 @@ void odrive_node::can_callback(const can_msgs::msg::Frame::SharedPtr msg){
       this->get_version_callback(msg);
       break;
     default:
-      RCLCPP_ERROR(this->get_logger(),"Invalid CMD ID");
+      RCLCPP_ERROR(this->get_logger(),"Invalid CMD : %x", msg->id & 0x1F);
+      RCLCPP_ERROR(this->get_logger(), "Data : ");
+      for(int i = 0; i < 8; i++){
+        RCLCPP_ERROR(this->get_logger(), "Data byte %d : %x", i, msg->data[i]);
+      }
   }
 
 }

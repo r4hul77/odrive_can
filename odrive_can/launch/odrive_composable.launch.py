@@ -91,6 +91,7 @@ def generate_launch_description():
         plugin='drivers::socketcan::SocketCanSenderNode',
         name='socket_can_sender',
         parameters=[params_file],
+
     ))
     
     container = ComposableNodeContainer(
@@ -100,6 +101,7 @@ def generate_launch_description():
         executable='component_container',
         composable_node_descriptions=compos_descs,
         output='screen',
+        arguments=['--ros-args', '--log-level', 'info'],
     )
     
     events = []

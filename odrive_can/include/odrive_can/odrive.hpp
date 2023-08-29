@@ -18,7 +18,6 @@
 #include "odrive_interfaces/srv/set_vel_gains.hpp"
 #include <math.h>
 #include "byte_swap.hpp"
-#include <mutex>
 #include <chrono>
 #include "rclcpp_components/register_node_macro.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
@@ -141,7 +140,6 @@ class odrive_node: public lc::LifecycleNode{
 
     void pub_cmd(float pos, float vel, float torque);
 
-    can_msgs::msg::Frame can_frame_;
     odrive_interfaces::msg::Encoder enc_msg_;
     odrive_interfaces::msg::BusVoltage bus_msg_;
     odrive_interfaces::msg::Torque torque_msg_;
@@ -161,7 +159,6 @@ class odrive_node: public lc::LifecycleNode{
 
     CONTROL_MODE ctrl_mode_;
     INPUT_MODE input_mode_;
-    std::mutex can_send_mtx;
     rclcpp::TimerBase::SharedPtr timer_;
     float gear_ratio_;
 
@@ -224,7 +221,9 @@ class odrive_node: public lc::LifecycleNode{
     void set_axis_state(AXIS_STATE& axis_state);
 
     void get_encoder_estimates_callback(const can_msgs::msg::Frame::SharedPtr msg);
-
+    
+    void set_limits_callback(const can_msgs::msg::Frame::SharedPtr msg);
+    
     void get_encoder_estimates();
 
     bool set_controller_mode(CONTROL_MODE &ctrl_mode, INPUT_MODE &input_mode);

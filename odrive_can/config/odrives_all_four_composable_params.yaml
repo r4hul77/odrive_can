@@ -2,10 +2,10 @@ odrive_0:
   ros__parameters:
     node_id: 0
     control_mode: 0x2
-    input_mode: 0x2
-    velocity_limit: 20000.0
+    input_mode: 0x1
+    velocity_limit: 3000.0
     current_limit: 23.44
-    traj_vel_limit: 20000.0
+    traj_vel_limit: 3000.0
     traj_accel_limit: 2000.0
     traj_decel_limit: 2000.0
     traj_inertia: 200.0
@@ -13,10 +13,10 @@ odrive_1:
   ros__parameters:
     node_id: 1
     control_mode: 0x2
-    input_mode: 0x2
-    velocity_limit: 20000.0
+    input_mode: 0x1
+    velocity_limit: 3000.0
     current_limit: 23.44
-    traj_vel_limit: 20000.0
+    traj_vel_limit: 3000.0
     traj_accel_limit: 2000.0
     traj_decel_limit: 2000.0
     traj_inertia: 200.0
@@ -24,10 +24,10 @@ odrive_2:
   ros__parameters:
     node_id: 2
     control_mode: 0x2
-    input_mode: 0x2
-    velocity_limit: 20000.0
+    input_mode: 0x1
+    velocity_limit: 3000.0
     current_limit: 23.44
-    traj_vel_limit: 20000.0
+    traj_vel_limit: 3000.0
     traj_accel_limit: 2000.0
     traj_decel_limit: 2000.0
     traj_inertia: 200.0
@@ -35,10 +35,10 @@ odrive_3:
   ros__parameters:
     node_id: 3
     control_mode: 0x2
-    input_mode: 0x2
-    velocity_limit: 20000.0
+    input_mode: 0x1
+    velocity_limit: 3000.0
     current_limit: 23.44
-    traj_vel_limit: 20000.0
+    traj_vel_limit: 3000.0
     traj_accel_limit: 2000.0
     traj_decel_limit: 2000.0
     traj_inertia: 200.0
@@ -46,15 +46,15 @@ socket_can_sender:
   ros__parameters:
     interface: can0
     timeout_sec: 0.01
-socket_can_reciver:
+socket_can_receiver:
   ros__parameters:
     interface: can0
     timeout_sec: 0.01
 lifecycle_manager:
   ros__parameters:
     autostart: true
-    node_names: ['socket_can_sender', 'socket_can_receiver', 'odrive_0', 'odrive_1', 'odrive_2', 'odrive_3']
-    bond_timeout: 4.0
+    node_names: ['socket_can_receiver', 'socket_can_sender', 'odrive_0', 'odrive_2', 'odrive_3']
+    bond_timeout: 0.0
     attempt_respawn_reconnection: true
     bond_respawn_max_duration: 10.0    
 
