@@ -16,6 +16,8 @@
 #include "odrive_interfaces/srv/reboot.hpp"
 #include "odrive_interfaces/srv/set_pos_gain.hpp"
 #include "odrive_interfaces/srv/set_vel_gains.hpp"
+#include "odrive_interfaces/srv/set_axis_state.hpp"
+#include "odrive_interfaces/msg/odrive_sensor.hpp"
 #include <math.h>
 #include "byte_swap.hpp"
 #include <chrono>
@@ -25,7 +27,7 @@
 #include "rclcpp_lifecycle/lifecycle_publisher.hpp"
 
 
-  enum CMD_IDS{
+  enum CMD_IDS:uint32_t{
     Get_Version = 0x000,
     Heartbeat = 0x001,
     Estop = 0x002,
@@ -74,23 +76,23 @@
   };
 
 
-  enum INPUT_MODE{
-    INACTIVE = 0x00,
-    PASSTHROUGH = 0x1,
-    VEL_RAMP = 0x2,
-    POS_FILTER = 0x3,
-    MIX_CHANNELS=0x4,
-    TRAP_TRAJ=0x5,
-    TORQUE_RAMP = 0x6,
-    MIRROR = 0x7,
-    TUNNING = 0x8,
+  enum INPUT_MODE:uint64_t{
+    INACTIVE = 0,
+    PASSTHROUGH=1,
+    VEL_RAMP=2,
+    POS_FILTER=3,
+    MIX_CHANNELS=4,
+    TRAP_TRAJ=5,
+    TORQUE_RAMP=6,
+    MIRROR=7,
+    TUNNING=8,
   };
 
-enum CONTROL_MODE{
-  VOLTAGE_CONTROL = 0x0, //Not Supported
-  TORQUE_CONTROL = 0x1,
-  VELOCITY_CONTROL = 0x2,
-  POSITION_CONTROL = 0x3,
+enum CONTROL_MODE: uint64_t{
+  VOLTAGE_CONTROL = 0, //Not Supported
+  TORQUE_CONTROL = 1,
+  VELOCITY_CONTROL = 2,
+  POSITION_CONTROL = 3,
 };
 
 
@@ -124,10 +126,10 @@ class odrive_node: public lc::LifecycleNode{
     
     uint8_t node_id_;
     
-    lc::LifecyclePublisher<odrive_interfaces::msg::Encoder>::SharedPtr pub_enc_;
+
+    lc::LifecyclePublisher<odrive_interfaces::msg::OdriveSensor>::SharedPtr pub_odrv_;
+
     lc::LifecyclePublisher<odrive_interfaces::msg::BusVoltage>::SharedPtr pub_bus_;
-    lc::LifecyclePublisher<odrive_interfaces::msg::Torque>:: SharedPtr pub_torque_;
-    lc::LifecyclePublisher<odrive_interfaces::msg::Iq>::SharedPtr pub_iq_;
     lc::LifecyclePublisher<can_msgs::msg::Frame>::SharedPtr pub_can_;
     lc::LifecyclePublisher<odrive_interfaces::msg::Temperature>::SharedPtr pub_temp_;
 
@@ -138,7 +140,7 @@ class odrive_node: public lc::LifecycleNode{
 
     void can_callback(const can_msgs::msg::Frame::SharedPtr msg);
 
-    void pub_cmd(float pos, float vel, float torque);
+    void pub_cmd(const float& pos,const float& vel,const float& torque);
 
     odrive_interfaces::msg::Encoder enc_msg_;
     odrive_interfaces::msg::BusVoltage bus_msg_;
@@ -156,12 +158,16 @@ class odrive_node: public lc::LifecycleNode{
     rclcpp::Service<odrive_interfaces::srv::ClearErrors>::SharedPtr clear_errors_srv_;
     rclcpp::Service<odrive_interfaces::srv::SetPosGain>::SharedPtr set_pos_gain_srv_;
     rclcpp::Service<odrive_interfaces::srv::SetVelGains>::SharedPtr set_vel_gains_srv_;
+    rclcpp::Service<odrive_interfaces::srv::SetAxisState>::SharedPtr set_axis_state_srv_;
 
     CONTROL_MODE ctrl_mode_;
     INPUT_MODE input_mode_;
-    rclcpp::TimerBase::SharedPtr timer_;
+    rclcpp::TimerBase::SharedPtr sanity_timer_;
+    rclcpp::TimerBase::SharedPtr sensor_sanity_timer_;
+
     float gear_ratio_;
 
+    uint8_t sensor_msg_flag_; 
 
   public:
    
@@ -216,9 +222,9 @@ class odrive_node: public lc::LifecycleNode{
 
     void get_error();
 
-    void set_axis_node_id(uint32_t& node_id);
+    void set_axis_node_id(const uint32_t& node_id);
 
-    void set_axis_state(AXIS_STATE& axis_state);
+    void set_axis_state(const AXIS_STATE& axis_state);
 
     void get_encoder_estimates_callback(const can_msgs::msg::Frame::SharedPtr msg);
     
@@ -228,11 +234,11 @@ class odrive_node: public lc::LifecycleNode{
 
     bool set_controller_mode(CONTROL_MODE &ctrl_mode, INPUT_MODE &input_mode);
 
-    void set_input_pos(float &pos, float& vel_max, float& torque_max);
+    void set_input_pos(const float &pos,const float& vel_max,const float& torque_max);
 
-    void set_input_vel(float & vel, float &torque_max);
+    void set_input_vel(const float & vel,const float &torque_max);
 
-    void set_input_torque(float & torque);
+    void set_input_torque(const float & torque);
 
     void set_limits(float & vel_limit, float& curr_limit);
 
@@ -268,7 +274,11 @@ class odrive_node: public lc::LifecycleNode{
 
     void initialize_controller();
 
+    void sensor_sanity_check();
+
     void get_torques();
+
+    void get_iq();
 };
 
 

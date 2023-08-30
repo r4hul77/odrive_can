@@ -2,37 +2,72 @@
 
 
 
-odrive_node::odrive_node(const rclcpp::NodeOptions & options):lc::LifecycleNode("odrive_node",options){
-}
-
-void odrive_node::init(){
-  get_parameters();
-  initialize_publishers();
-  initialize_services();
+odrive_node::odrive_node(const rclcpp::NodeOptions & options):lc::LifecycleNode("odrive_node",options), sensor_msg_flag_(0b000){
 }
 
 CallbackReturn odrive_node::on_configure(const lc::State & state){
   RCLCPP_INFO(this->get_logger(),"Configuring");
-  init();
-
+  get_parameters();
+  initialize_publishers();
+  initialize_services();
   return CallbackReturn::SUCCESS;
 }
 
 CallbackReturn odrive_node::on_activate(const lc::State & state){
-  pub_enc_->on_activate();
   pub_can_->on_activate();
-  pub_enc_->on_activate();
-  pub_iq_->on_activate();
   pub_bus_->on_activate();
   pub_temp_->on_activate();
-  timer_ = this->create_wall_timer(std::chrono::milliseconds(1000),std::bind(&odrive_node::sanity_checker,this));
+  pub_odrv_->on_activate();
+  sanity_timer_ = this->create_wall_timer(std::chrono::milliseconds(1000),std::bind(&odrive_node::sanity_checker,this));
+  sensor_sanity_timer_= this->create_wall_timer(std::chrono::milliseconds(10), std::bind(&odrive_node::sensor_sanity_check, this));
   initialize_subscription();
   get_version();
   initialize_controller();
   return CallbackReturn::SUCCESS;
 }
 
+void odrive_node::sensor_sanity_check(){
+  static int skipped_msgs = 0;
+  while(!sensor_msg_flag_ & 0b111||skipped_msgs>10){
+    sensor_sanity_timer_->reset();
+    if(!sensor_msg_flag_ & 0b100){
+      get_encoder_estimates();
+      RCLCPP_WARN(this->get_logger(), "Didn't Receive Encoder Messages this cycle requesting it");
+    }
+    if(!sensor_msg_flag_ & 0b100){
+      get_iq();
+      RCLCPP_WARN(this->get_logger(), "Didn't Receive Iq Messages this cycle requesting it");
+    }
+    if(!sensor_msg_flag_ & 0b001){
+      get_torques();
+      RCLCPP_WARN(this->get_logger(), "Didn't Receive Torques Messages this cycle requesting it");
+    }
+    break;
+    rclcpp::sleep_for(std::chrono::microseconds(1000));
+  }
+  sensor_msg_flag_ = 0b000;
+  odrive_interfaces::msg::OdriveSensor odrv_msg_;
+  odrv_msg_.torque = torque_msg_;
+  odrv_msg_.encoder = enc_msg_;
+  odrv_msg_.iq = iq_msg_;
+  pub_odrv_->publish(std::move(odrv_msg_));
+}
+
+
 CallbackReturn odrive_node::on_deactivate(const lc::State & state){
+  pub_cmd(0, 0, 0);
+  set_axis_state(AXIS_STATE::IDLE);
+  //reset all timers
+  sanity_timer_.reset();
+  sensor_sanity_timer_.reset();
+  //deactivate all publishers
+  pub_bus_->on_deactivate();
+  pub_can_->on_deactivate();
+  pub_temp_->on_deactivate();
+  pub_odrv_->on_deactivate();
+  //reset all subscriptions
+  sub_can_.reset();
+  sub_target_.reset();
   RCLCPP_INFO(this->get_logger(),"Deactivating");
   return CallbackReturn::SUCCESS;
 }
@@ -40,15 +75,11 @@ CallbackReturn odrive_node::on_deactivate(const lc::State & state){
 CallbackReturn odrive_node::on_cleanup(const lc::State & state){
   RCLCPP_INFO(this->get_logger(),"Cleaning Up");
   //reset all publishers
-  pub_enc_.reset();
   pub_bus_.reset();
-  pub_torque_.reset();
-  pub_iq_.reset();
   pub_can_.reset();
   pub_temp_.reset();
-  //reset all subscriptions
-  sub_can_.reset();
-  sub_target_.reset();
+  pub_odrv_.reset();
+
   //reset all services
   reboot_srv_.reset();
   clear_errors_srv_.reset();
@@ -88,11 +119,22 @@ void odrive_node::initialize_services(){
     this->set_vel_gain(request->vel_gain, request->vel_integrator_gain);
     response->vel_gains_set = true;
   };
+  auto set_axis_state_callback = [this](std::shared_ptr<odrive_interfaces::srv::SetAxisState::Request> request, std::shared_ptr<odrive_interfaces::srv::SetAxisState::Response> response) -> void {
+    if(!(request->axis_state < 0x0D && request->axis_state > 0x00))
+      {
+        response->axis_state_set = false;
+        RCLCPP_ERROR(this->get_logger(),"Invalid Axis State");
+        return;
+      }
+      this->set_axis_state((AXIS_STATE)request->axis_state);
+    response->axis_state_set = true;
+  };
   // Create the services and pass the callbacks
   reboot_srv_ = this->create_service<odrive_interfaces::srv::Reboot>("reboot",reboot_callback);
   clear_errors_srv_ = this->create_service<odrive_interfaces::srv::ClearErrors>("clear_errors",clear_errors_callback);
   set_pos_gain_srv_ = this->create_service<odrive_interfaces::srv::SetPosGain>("set_pos_gain",set_pos_gain_callback);
   set_vel_gains_srv_ = this->create_service<odrive_interfaces::srv::SetVelGains>("set_vel_gains",set_vel_gains_callback);
+  set_axis_state_srv_ = this->create_service<odrive_interfaces::srv::SetAxisState>("set_axis_state",set_axis_state_callback);
 }
 
 void odrive_node::initialize_controller(){
@@ -101,6 +143,7 @@ void odrive_node::initialize_controller(){
   set_traj_vel_limit(limits_.traj_vel_limit);
   set_traj_accel_limit(limits_.traj_accel_limit,limits_.traj_deaccel_limit);
   set_traj_inertia(limits_.traj_inertia);
+  set_axis_state(AXIS_STATE::CLOSED_LOOP_CONTROL);
 }
 
 
@@ -134,6 +177,7 @@ void odrive_node::get_parameters(){
   this->get_parameter("input_mode", placeholder);
   input_mode_ = static_cast<INPUT_MODE>(placeholder);
   this->get_parameter("velocity_limit",limits_.velocity_limit);
+  limits_.velocity_limit /= 2*M_PI/gear_ratio_;
   this->get_parameter("current_limit",limits_.current_limit);
   this->get_parameter("traj_vel_limit",limits_.traj_vel_limit);
   this->get_parameter("traj_accel_limit",limits_.traj_accel_limit);
@@ -151,18 +195,16 @@ void odrive_node::get_parameters(){
 }
 
 void odrive_node::initialize_publishers(){
-  pub_enc_ = this->create_publisher<odrive_interfaces::msg::Encoder>(frame_id_ + "/encoder",10);
   pub_bus_ = this->create_publisher<odrive_interfaces::msg::BusVoltage>(frame_id_ + "/bus_voltage",10);
-  pub_torque_ = this->create_publisher<odrive_interfaces::msg::Torque>(frame_id_ + "/torque",10);
-  pub_iq_ = this->create_publisher<odrive_interfaces::msg::Iq>(frame_id_ + "/iq",10);
   pub_can_ = this->create_publisher<can_msgs::msg::Frame>("/to_can_bus",10);
   pub_temp_ = this->create_publisher<odrive_interfaces::msg::Temperature>(frame_id_ + "/temperature",10);
+  pub_odrv_ = this->create_publisher<odrive_interfaces::msg::OdriveSensor>(frame_id_ + "/sensor", 25);
 }
 
 void odrive_node::initialize_subscription(){
   // Create call back groups for sub_can and sub_target
-  auto sub_can_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  auto sub_target_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  auto sub_can_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+  auto sub_target_callback_group = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
   // Create sub_can and sub_target
   rclcpp::SubscriptionOptions sub_can_options;
   sub_can_options.callback_group = sub_can_callback_group;
@@ -174,12 +216,12 @@ void odrive_node::initialize_subscription(){
 
 void odrive_node::target_callback(const odrive_interfaces::msg::Target::SharedPtr msg){
 set_controller_mode(ctrl_mode_,input_mode_);
-RCLCPP_ERROR(this->get_logger(), "pos %lf, vel %lf, torque %lf", msg->pos_des.data, msg->vel_des.data, msg->torque_des.data);
+RCLCPP_DEBUG(this->get_logger(), "pos %lf, vel %lf, torque %lf", msg->pos_des.data, msg->vel_des.data, msg->torque_des.data);
   pub_cmd(msg->pos_des.data*gear_ratio_/(2*M_PI), msg->vel_des.data*gear_ratio_/(2*M_PI), msg->torque_des.data/gear_ratio_);
 }
 
-void odrive_node::pub_cmd(float pos, float vel, float torque){
-  RCLCPP_ERROR(this->get_logger(), "pos %lf, vel %lf, torque %lf", pos, vel, torque);
+void odrive_node::pub_cmd(const float& pos,const float& vel,const float& torque){
+  RCLCPP_DEBUG(this->get_logger(), "pos %f, vel %f, torque %f", pos, vel, torque);
   switch(ctrl_mode_){
     case CONTROL_MODE::POSITION_CONTROL:
       this->set_input_pos(pos,vel, torque);
@@ -279,7 +321,7 @@ void odrive_node::get_error(){
   pub_can_->publish(std::move(can_frame_));
 }
 
-void odrive_node::set_axis_node_id(uint32_t& node_id){
+void odrive_node::set_axis_node_id(const uint32_t& node_id){
   can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Axis_Node_ID;
   can_frame_.is_extended = false;
@@ -291,7 +333,7 @@ void odrive_node::set_axis_node_id(uint32_t& node_id){
   pub_can_->publish(std::move(can_frame_));
 }
 
-void odrive_node::set_axis_state(AXIS_STATE& axis_state){
+void odrive_node::set_axis_state(const AXIS_STATE& axis_state){
   can_msgs::msg::Frame can_frame_;
 
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Axis_State;
@@ -312,7 +354,9 @@ void odrive_node::get_encoder_estimates_callback(const can_msgs::msg::Frame::Sha
   enc_msg_.header.stamp = msg->header.stamp;
   // enc_msg_.pos.data = (float) (msg->data[0] | msg->data[1] << 8 | msg->data[2] << 16 | msg->data[3] << 24) / 100.0;
   // enc_msg_.vel.data = (float) (msg->data[4] | msg->data[5] << 8 | msg->data[6] << 16 | msg->data[7] << 24) / 100.0;
-  pub_enc_->publish(enc_msg_);
+  //pub_enc_->publish(enc_msg_);
+  RCLCPP_DEBUG(this->get_logger(), "Encoders Estimates Received");
+  sensor_msg_flag_ |= 0b100;
 }
 
 
@@ -395,10 +439,8 @@ bool odrive_node::set_controller_mode(CONTROL_MODE &ctrl_mode, INPUT_MODE &input
   can_frame_.is_rtr = false;
   can_frame_.is_error = false;
   can_frame_.dlc = 8;
-  uint32_t placeholder = static_cast<uint32_t>(ctrl_mode_);
-  write_le<uint32_t>(placeholder, can_frame_.data.begin());
-  placeholder = static_cast<uint32_t>(input_mode_);
-  write_le<uint32_t>(placeholder, can_frame_.data.begin() + 4);
+  write_le<uint32_t>(ctrl_mode_, can_frame_.data.begin());
+  write_le<uint32_t>(input_mode_, can_frame_.data.begin() + 4);
   pub_can_->publish(std::move(can_frame_));
   return true;
 }
@@ -414,11 +456,11 @@ void odrive_node::get_bus_voltage(){
 
 }
 
-void odrive_node::set_input_pos(float &pos, float& vel_max, float& torque_max){
+void odrive_node::set_input_pos(const float &pos, const float& vel_max, const float& torque_max){
   can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Input_Pos;
   can_frame_.is_extended = false;
-  can_frame_.is_rtr = true;
+  can_frame_.is_rtr = false;
   can_frame_.is_error = false;
   can_frame_.dlc = 8;
   write_le<float>(pos, can_frame_.data.begin());
@@ -428,7 +470,7 @@ void odrive_node::set_input_pos(float &pos, float& vel_max, float& torque_max){
 
 }
 
-void odrive_node::set_input_vel(float & vel, float &torque_max){
+void odrive_node::set_input_vel(const float & vel, const float &torque_max){
   can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Input_Vel;
   can_frame_.is_extended = false;
@@ -441,7 +483,7 @@ void odrive_node::set_input_vel(float & vel, float &torque_max){
 
 }
 
-void odrive_node::set_input_torque(float & torque){
+void odrive_node::set_input_torque(const float & torque){
   can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Input_Torque;
   can_frame_.is_extended = false;
@@ -469,7 +511,7 @@ void odrive_node::set_limits(float & vel_limit, float & curr_limit){
 void odrive_node::set_limits_callback(const can_msgs::msg::Frame::SharedPtr msg){
   float vel_limit_set = read_le<float>(msg->data.begin());
   float curr_limit_set = read_le<float>(msg->data.begin()+4);
-  RCLCPP_ERROR(this->get_logger(), "vel limit: %f, curr limit %f", vel_limit_set, curr_limit_set);
+  RCLCPP_DEBUG(this->get_logger(), "vel limit: %f, curr limit %f", vel_limit_set, curr_limit_set);
 }
 
 void odrive_node::set_traj_vel_limit(float &traj_vel_limit){
@@ -513,7 +555,9 @@ void odrive_node::get_iq_callback(const can_msgs::msg::Frame::SharedPtr msg){
   iq_msg_.iq_des.data = read_le<float>(msg->data.begin());
   iq_msg_.iq_est.data = read_le<float>(msg->data.begin() + 4);
   iq_msg_.header.stamp = msg->header.stamp;
-  pub_iq_->publish(iq_msg_);
+  RCLCPP_DEBUG(this->get_logger(), "Iq MSG recived");
+  //pub_iq_->publish(iq_msg_);
+  sensor_msg_flag_ |= 0b010;
 }
 
 
@@ -588,12 +632,25 @@ void odrive_node::get_torques_callback(const can_msgs::msg::Frame::SharedPtr msg
   torque_msg_.torque_des.data = read_le<float>(msg->data.begin())*gear_ratio_;
   torque_msg_.torque_est.data = read_le<float>(msg->data.begin() + 4)*gear_ratio_;
   torque_msg_.header.stamp = msg->header.stamp;
-  pub_torque_->publish(torque_msg_);
+  //pub_torque_->publish(torque_msg_);
+  RCLCPP_ERROR(this->get_logger(), "Torques MSG received torques des %f torques est %f", torque_msg_.torque_des.data, torque_msg_.torque_est.data);
+  sensor_msg_flag_ |= 0b001;
 }
 
 void odrive_node::get_torques(){
   can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Get_Torques;
+  can_frame_.is_extended = false;
+  can_frame_.is_rtr = true;
+  can_frame_.is_error = false;
+  can_frame_.dlc = 0;
+  pub_can_->publish(std::move(can_frame_));
+
+}
+
+void odrive_node::get_iq(){
+  can_msgs::msg::Frame can_frame_;
+  can_frame_.id = node_id_ << 5 | CMD_IDS::Get_Iq;
   can_frame_.is_extended = false;
   can_frame_.is_rtr = true;
   can_frame_.is_error = false;
@@ -641,15 +698,14 @@ void odrive_node::can_callback(const can_msgs::msg::Frame::SharedPtr msg){
     case CMD_IDS::Get_Version:
       this->get_version_callback(msg);
       break;
+
+    break;
     default:
-      RCLCPP_ERROR(this->get_logger(),"Invalid CMD : %x", msg->id & 0x1F);
-      RCLCPP_ERROR(this->get_logger(), "Data : ");
-      for(int i = 0; i < 8; i++){
-        RCLCPP_ERROR(this->get_logger(), "Data byte %d : %x", i, msg->data[i]);
+      RCLCPP_INFO(this->get_logger(), "Unknown Mesage received with ID %x", msg->id & 0x1F);
       }
+
   }
 
-}
 
 #include "rclcpp_components/register_node_macro.hpp"
 

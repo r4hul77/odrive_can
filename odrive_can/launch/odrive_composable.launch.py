@@ -66,7 +66,7 @@ def generate_launch_description():
     
     compos_descs = []
 
-    log_level = 'warn'
+    log_level = 'debug'
     
     for i in range(4):
         compos_descs.append(ComposableNode(
@@ -101,7 +101,7 @@ def generate_launch_description():
         executable='component_container',
         composable_node_descriptions=compos_descs,
         output='screen',
-        arguments=['--ros-args', '--log-level', 'info'],
+        arguments=['--ros-args', '--log-level', 'debug'],
     )
     
     events = []

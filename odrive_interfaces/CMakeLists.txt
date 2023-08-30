@@ -20,12 +20,14 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BusVoltage.msg"
   "msg/Torque.msg"
   "msg/Temperature.msg"
+  "msg/OdriveSensor.msg"
   "srv/ClearErrors.srv"
   "srv/Reboot.srv"
   "srv/SetControllerMode.srv"
   "srv/SetAbsPos.srv"
   "srv/SetPosGain.srv"
   "srv/SetVelGains.srv"
+  "srv/SetAxisState.srv"
   DEPENDENCIES std_msgs
  )
 if(BUILD_TESTING)
