@@ -15,7 +15,9 @@
   <depend>odrive_interfaces</depend>
   <depend>diagnostic_msgs</depend>
   <depend>rclcpp_lifecycle</depend>
-  
+  <depend>bondcpp</depend>
+  <depend>bond</depend>
+    
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 

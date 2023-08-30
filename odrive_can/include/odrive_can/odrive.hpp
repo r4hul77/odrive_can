@@ -25,6 +25,8 @@
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
 #include "rclcpp_lifecycle/lifecycle_publisher.hpp"
+#include "bondcpp/bond.hpp"
+#include "bond/msg/constants.hpp"
 
 
   enum CMD_IDS:uint32_t{
@@ -150,7 +152,7 @@ class odrive_node: public lc::LifecycleNode{
     std::string frame_id_;
     version_info version_info_;
     controller_limits limits_;
-
+    std::unique_ptr<bond::Bond> bond_{nullptr};
     bool heart_beat_received_;
 
 
@@ -215,6 +217,10 @@ class odrive_node: public lc::LifecycleNode{
     void heartbeat_callback(const can_msgs::msg::Frame::SharedPtr msg);
 
     void get_heartbeat();
+
+    void create_bond();
+
+    void destroy_bond();
 
     void publish_estop();
 

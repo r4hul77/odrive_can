@@ -14,6 +14,7 @@ CallbackReturn odrive_node::on_configure(const lc::State & state){
 }
 
 CallbackReturn odrive_node::on_activate(const lc::State & state){
+  this->create_bond();
   pub_can_->on_activate();
   pub_bus_->on_activate();
   pub_temp_->on_activate();
@@ -68,6 +69,8 @@ CallbackReturn odrive_node::on_deactivate(const lc::State & state){
   //reset all subscriptions
   sub_can_.reset();
   sub_target_.reset();
+  //destory bond
+  this->destroy_bond();
   RCLCPP_INFO(this->get_logger(),"Deactivating");
   return CallbackReturn::SUCCESS;
 }
@@ -261,6 +264,27 @@ void odrive_node::get_version(){
 
 }
 
+void odrive_node::create_bond(){
+  RCLCPP_INFO(get_logger(), "Creating bond (%s) to lifecycle manager.", this->get_name());
+
+  bond_ = std::make_unique<bond::Bond>(
+    std::string("bond"),
+    this->get_name(),
+    shared_from_this());
+
+  bond_->setHeartbeatPeriod(0.10);
+  bond_->setHeartbeatTimeout(4.0);
+  bond_->start();
+
+}
+
+void odrive_node::destroy_bond(){
+  RCLCPP_INFO(get_logger(), "Destroying bond (%s) to lifecycle manager.", this->get_name());
+
+  if (bond_) {
+    bond_.reset();
+  }  
+}
 
 void odrive_node::heartbeat_callback(const can_msgs::msg::Frame::SharedPtr msg){
   heart_beat_received_ = true;

@@ -13,6 +13,8 @@ find_package(rclcpp REQUIRED)
 find_package(odrive_interfaces REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
 find_package(rclcpp_components REQUIRED)
+find_package(bondcpp REQUIRED)
+find_package(bond REQUIRED)
 
 include_directories(include/odrive_can)
 add_executable(odrive_can_node src/main.cpp src/odrive.cpp)
@@ -39,6 +41,8 @@ ament_target_dependencies(
   "std_msgs"
   "odrive_interfaces"
   "diagnostic_msgs"
+  "bondcpp"
+  "bond"
   )
 
 ament_target_dependencies(
@@ -49,6 +53,8 @@ ament_target_dependencies(
   "std_msgs"
   "odrive_interfaces"
   "diagnostic_msgs"
+  "bondcpp"
+  "bond"
   )
 
 rclcpp_components_register_nodes(odrive_can_component 

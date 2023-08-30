@@ -53,8 +53,8 @@ socket_can_receiver:
 lifecycle_manager:
   ros__parameters:
     autostart: true
-    node_names: ['socket_can_receiver', 'socket_can_sender', 'odrive_0', 'odrive_1', 'odrive_2', 'odrive_3']
-    bond_timeout: 0.0
+    node_names: ['socket_can_sender', 'socket_can_receiver', 'odrive_0', 'odrive_1', 'odrive_2', 'odrive_3']
+    bond_timeout: 0.3
     attempt_respawn_reconnection: true
     bond_respawn_max_duration: 10.0    
 
