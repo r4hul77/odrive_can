@@ -656,7 +656,7 @@ void odrive_node::get_torques_callback(const can_msgs::msg::Frame::SharedPtr msg
   torque_msg_.torque_est.data = read_le<float>(msg->data.begin() + 4)*gear_ratio_;
   torque_msg_.header.stamp = msg->header.stamp;
   //pub_torque_->publish(torque_msg_);
-  RCLCPP_ERROR(this->get_logger(), "Torques MSG received torques des %f torques est %f", torque_msg_.torque_des.data, torque_msg_.torque_est.data);
+  RCLCPP_DEBUG(this->get_logger(), "Torques MSG received torques des %f torques est %f", torque_msg_.torque_des.data, torque_msg_.torque_est.data);
   sensor_msg_flag_ |= 0b001;
 }
 

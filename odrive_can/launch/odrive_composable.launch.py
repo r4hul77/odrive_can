@@ -66,7 +66,7 @@ def generate_launch_description():
     
     compos_descs = []
 
-    log_level = 'debug'
+    log_level = 'warn'
     
     for i in range(4):
         compos_descs.append(ComposableNode(
@@ -84,6 +84,7 @@ def generate_launch_description():
         plugin='drivers::socketcan::SocketCanReceiverNode',
         name='socket_can_receiver',
         parameters=[params_file],
+
     ))
     
     compos_descs.append(ComposableNode(
@@ -98,11 +99,14 @@ def generate_launch_description():
         name='odrive_container',
         namespace='',
         package='rclcpp_components',
-        executable='component_container',
+        executable='component_container_mt',
         composable_node_descriptions=compos_descs,
         output='screen',
-        arguments=['--ros-args', '--log-level', 'debug'],
-    )
+        #prefix=['valgrind --tool=callgrind --dump-instr=yes -v --instr-atstart=no'],
+        ros_arguments=['--log-level', log_level],
+        arguments=[{'use_intra_process_comms': True}],
+        respawn=True,
+        )
     
     events = []
     #for node in compos_descs:
@@ -115,6 +119,7 @@ def generate_launch_description():
                     name='lifecycle_manager',
                     output='screen',
                     arguments=['--ros-args', '--log-level', log_level],
+                    respawn=True,
                     parameters = [params_file]
                     )
         
