@@ -130,11 +130,11 @@ void odrive_node::initialize_services(){
     response->axis_state_set = true;
   };
   // Create the services and pass the callbacks
-  reboot_srv_ = this->create_service<odrive_interfaces::srv::Reboot>("reboot",reboot_callback);
-  clear_errors_srv_ = this->create_service<odrive_interfaces::srv::ClearErrors>("clear_errors",clear_errors_callback);
-  set_pos_gain_srv_ = this->create_service<odrive_interfaces::srv::SetPosGain>("set_pos_gain",set_pos_gain_callback);
-  set_vel_gains_srv_ = this->create_service<odrive_interfaces::srv::SetVelGains>("set_vel_gains",set_vel_gains_callback);
-  set_axis_state_srv_ = this->create_service<odrive_interfaces::srv::SetAxisState>("set_axis_state",set_axis_state_callback);
+  reboot_srv_ = this->create_service<odrive_interfaces::srv::Reboot>(frame_id_ + "/reboot",reboot_callback);
+  clear_errors_srv_ = this->create_service<odrive_interfaces::srv::ClearErrors>(frame_id_ + "/clear_errors",clear_errors_callback);
+  set_pos_gain_srv_ = this->create_service<odrive_interfaces::srv::SetPosGain>(frame_id_ + "/set_pos_gain",set_pos_gain_callback);
+  set_vel_gains_srv_ = this->create_service<odrive_interfaces::srv::SetVelGains>(frame_id_ + "/set_vel_gains",set_vel_gains_callback);
+  set_axis_state_srv_ = this->create_service<odrive_interfaces::srv::SetAxisState>(frame_id_ + "/set_axis_state",set_axis_state_callback);
 }
 
 void odrive_node::initialize_controller(){
@@ -215,7 +215,6 @@ void odrive_node::initialize_subscription(){
 }
 
 void odrive_node::target_callback(const odrive_interfaces::msg::Target::SharedPtr msg){
-set_controller_mode(ctrl_mode_,input_mode_);
 RCLCPP_DEBUG(this->get_logger(), "pos %lf, vel %lf, torque %lf", msg->pos_des.data, msg->vel_des.data, msg->torque_des.data);
   pub_cmd(msg->pos_des.data*gear_ratio_/(2*M_PI), msg->vel_des.data*gear_ratio_/(2*M_PI), msg->torque_des.data/gear_ratio_);
 }
@@ -464,8 +463,8 @@ void odrive_node::set_input_pos(const float &pos, const float& vel_max, const fl
   can_frame_.is_error = false;
   can_frame_.dlc = 8;
   write_le<float>(pos, can_frame_.data.begin());
-  write_le<int16_t>(vel_max*1000, can_frame_.data.begin() + 4);
-  write_le<int16_t>(torque_max*1000, can_frame_.data.begin() + 6);
+  write_le<int16_t>((int16_t)vel_max*1000, can_frame_.data.begin() + 4);
+  write_le<int16_t>((int16_t)torque_max*1000, can_frame_.data.begin() + 6);
   pub_can_->publish(std::move(can_frame_));
 
 }
