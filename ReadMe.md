@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `odrive_can` package is a ROS2 package designed to facilitate communication and control with the ODrive motor controller via the CAN protocol. This package provides a lifecycle-managed node to handle these communications. It exposes various ROS2 services for control actions and utilizes ROS2 publishers for real-time data reporting and monitoring.
+The odrive_can package serves as a ROS2 interface, streamlining interactions and control mechanisms with the ODrive motor controller through the CAN communication protocol. Incorporating lifecycle management, this node efficiently manages data exchanges and control operations. It offers a range of ROS2 services for control tasks while employing ROS2 publishers for instantaneous data tracking and surveillance. When integrated with a lifecycle manager, this node has the ability to automatically restart if any issues arise.
 
 ## Features
 
