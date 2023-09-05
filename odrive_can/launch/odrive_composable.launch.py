@@ -66,7 +66,7 @@ def generate_launch_description():
     
     compos_descs = []
 
-    log_level = 'warn'
+    log_level = 'error'
     
     for i in range(4):
         compos_descs.append(ComposableNode(

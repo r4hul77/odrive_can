@@ -56,11 +56,12 @@ void odrive_node::sensor_sanity_check(){
 
 
 CallbackReturn odrive_node::on_deactivate(const lc::State & state){
+  sanity_timer_.reset();
+  sensor_sanity_timer_.reset();
+  
   pub_cmd(0, 0, 0);
   set_axis_state(AXIS_STATE::IDLE);
   //reset all timers
-  sanity_timer_.reset();
-  sensor_sanity_timer_.reset();
   //deactivate all publishers
   pub_bus_->on_deactivate();
   pub_can_->on_deactivate();
@@ -141,12 +142,12 @@ void odrive_node::initialize_services(){
 }
 
 void odrive_node::initialize_controller(){
+  set_axis_state(AXIS_STATE::CLOSED_LOOP_CONTROL);
   set_controller_mode(ctrl_mode_,input_mode_);
   set_limits(limits_.velocity_limit,limits_.current_limit);
   set_traj_vel_limit(limits_.traj_vel_limit);
   set_traj_accel_limit(limits_.traj_accel_limit,limits_.traj_deaccel_limit);
   set_traj_inertia(limits_.traj_inertia);
-  set_axis_state(AXIS_STATE::CLOSED_LOOP_CONTROL);
 }
 
 
@@ -179,14 +180,17 @@ void odrive_node::get_parameters(){
   ctrl_mode_ = static_cast<CONTROL_MODE>(placeholder);
   this->get_parameter("input_mode", placeholder);
   input_mode_ = static_cast<INPUT_MODE>(placeholder);
+  this->get_parameter("gear_ratio",gear_ratio_);
   this->get_parameter("velocity_limit",limits_.velocity_limit);
-  limits_.velocity_limit /= 2*M_PI/gear_ratio_;
+  limits_.velocity_limit = limits_.velocity_limit*gear_ratio_/(2*M_PI);
   this->get_parameter("current_limit",limits_.current_limit);
   this->get_parameter("traj_vel_limit",limits_.traj_vel_limit);
+  limits_.traj_vel_limit /= 2*M_PI/gear_ratio_;
   this->get_parameter("traj_accel_limit",limits_.traj_accel_limit);
+  limits_.traj_accel_limit /= 2*M_PI/gear_ratio_;
   this->get_parameter("traj_deaccel_limit",limits_.traj_deaccel_limit);
+  limits_.traj_deaccel_limit /= 2*M_PI/gear_ratio_;
   this->get_parameter("traj_inertia",limits_.traj_inertia);
-  this->get_parameter("gear_ratio",gear_ratio_);
 
   this->frame_id_ = "odrive" + std::to_string(node_id_);
 
@@ -329,6 +333,7 @@ void odrive_node::get_error_callback(const can_msgs::msg::Frame::SharedPtr msg){
   if(axis_error_ != 0){
     RCLCPP_ERROR(this->get_logger(),"Axis Error: %d",axis_error_);
     RCLCPP_ERROR(this->get_logger(),"Disarm Reason: %d",disarm_reason);
+    clear_errors();
     // publish Diag Message
   }
 }
@@ -519,6 +524,7 @@ void odrive_node::set_input_torque(const float & torque){
 }
 
 void odrive_node::set_limits(float & vel_limit, float & curr_limit){
+  RCLCPP_DEBUG(this->get_logger(), "Vel limit %f, Current Limit %f", vel_limit, curr_limit);
   can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Set_Limits;
   can_frame_.is_extended = false;
@@ -607,7 +613,7 @@ void odrive_node::clear_errors(){
   can_msgs::msg::Frame can_frame_;
   can_frame_.id = node_id_ << 5 | CMD_IDS::Clear_Errors;
   can_frame_.is_extended = false;
-  can_frame_.is_rtr = false;
+  can_frame_.is_rtr = true;
   can_frame_.is_error = false;
   pub_can_->publish(std::move(can_frame_));
 
