@@ -334,6 +334,9 @@ void odrive_node::get_error_callback(const can_msgs::msg::Frame::SharedPtr msg){
     RCLCPP_ERROR(this->get_logger(),"Axis Error: %d",axis_error_);
     RCLCPP_ERROR(this->get_logger(),"Disarm Reason: %d",disarm_reason);
     clear_errors();
+    rclcpp::sleep_for(std::chrono::microseconds(1000));
+    set_axis_state(AXIS_STATE::CLOSED_LOOP_CONTROL);
+
     // publish Diag Message
   }
 }
