@@ -382,7 +382,8 @@ void odrive_node::get_encoder_estimates_callback(const can_msgs::msg::Frame::Sha
   enc_msg_.pos.data *=  2*M_PI/gear_ratio_;
   enc_msg_.vel.data = read_le<float>(msg->data.begin() + 4);
   enc_msg_.vel.data *= 2*M_PI/gear_ratio_;
-  enc_msg_.header.stamp = msg->header.stamp;
+  // enc_msg_.header.stamp = msg->header.stamp;
+  enc_msg_.header.stamp = this->now();
   // enc_msg_.pos.data = (float) (msg->data[0] | msg->data[1] << 8 | msg->data[2] << 16 | msg->data[3] << 24) / 100.0;
   // enc_msg_.vel.data = (float) (msg->data[4] | msg->data[5] << 8 | msg->data[6] << 16 | msg->data[7] << 24) / 100.0;
   //pub_enc_->publish(enc_msg_);
