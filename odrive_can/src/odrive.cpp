@@ -1,8 +1,7 @@
 #include "odrive.hpp"
 
-
-
-odrive_node::odrive_node(const rclcpp::NodeOptions & options):lc::LifecycleNode("odrive_node",options), sensor_msg_flag_(0b000){
+odrive_node::odrive_node(const rclcpp::NodeOptions & options):lc::LifecycleNode("odrive_node",options), sensor_msg_flag_(0b000), updater_(this){
+ heart_beat_received_time_ = std::chrono::system_clock::now();
 }
 
 CallbackReturn odrive_node::on_configure(const lc::State & state){
@@ -10,8 +9,18 @@ CallbackReturn odrive_node::on_configure(const lc::State & state){
   get_parameters();
   initialize_publishers();
   initialize_services();
+  initialize_diagnostic();
   return CallbackReturn::SUCCESS;
 }
+
+void odrive_node::initialize_diagnostic(){
+  updater_.setHardwareID("odrive");
+  updater_.add("Heart Beat", this, &odrive_node::sanity_checker);
+  updater_.add("Error", this, &odrive_node::error_diag);
+  updater_.force_update();
+}
+
+
 
 CallbackReturn odrive_node::on_activate(const lc::State & state){
   this->create_bond();
@@ -19,7 +28,6 @@ CallbackReturn odrive_node::on_activate(const lc::State & state){
   pub_bus_->on_activate();
   pub_temp_->on_activate();
   pub_odrv_->on_activate();
-  sanity_timer_ = this->create_wall_timer(std::chrono::milliseconds(1000),std::bind(&odrive_node::sanity_checker,this));
   sensor_sanity_timer_= this->create_wall_timer(std::chrono::milliseconds(10), std::bind(&odrive_node::sensor_sanity_check, this));
   initialize_subscription();
   get_version();
@@ -28,8 +36,8 @@ CallbackReturn odrive_node::on_activate(const lc::State & state){
 }
 
 void odrive_node::sensor_sanity_check(){
-  static int skipped_msgs = 0;
-  while(!sensor_msg_flag_ & 0b111||skipped_msgs>10){
+  int skipped_msgs = 0;
+  while(!sensor_msg_flag_ & 0b111||skipped_msgs>2){
     sensor_sanity_timer_->reset();
     if(!sensor_msg_flag_ & 0b100){
       get_encoder_estimates();
@@ -44,7 +52,8 @@ void odrive_node::sensor_sanity_check(){
       RCLCPP_WARN(this->get_logger(), "Didn't Receive Torques Messages this cycle requesting it");
     }
     break;
-    rclcpp::sleep_for(std::chrono::microseconds(1000));
+    rclcpp::sleep_for(std::chrono::microseconds(10));
+    skipped_msgs++;
   }
   sensor_msg_flag_ = 0b000;
   odrive_interfaces::msg::OdriveSensor odrv_msg_;
@@ -56,7 +65,6 @@ void odrive_node::sensor_sanity_check(){
 
 
 CallbackReturn odrive_node::on_deactivate(const lc::State & state){
-  sanity_timer_.reset();
   sensor_sanity_timer_.reset();
   
   pub_cmd(0, 0, 0);
@@ -151,13 +159,20 @@ void odrive_node::initialize_controller(){
 }
 
 
-void odrive_node::sanity_checker(){
-  if(!heart_beat_received_){
-    this->get_heartbeat();
-    if(! heart_beat_received_){
-      RCLCPP_ERROR(this->get_logger(),"Heartbeat not received is the Odrive Powered On?");
-    }
+void odrive_node::sanity_checker(diagnostic_updater::DiagnosticStatusWrapper & stat){
+  auto now = std::chrono::system_clock::now();
+
+  if(std::chrono::duration_cast<std::chrono::milliseconds>(heart_beat_received_time_ - now) < std::chrono::milliseconds(200)){
+      stat.summary(
+      diagnostic_msgs::msg::DiagnosticStatus::OK,
+      "Everything is Fine");
   }
+  else{
+    stat.summary(
+      diagnostic_msgs::msg::DiagnosticStatus::ERROR,
+      "No Heart Beat");
+  }
+
   heart_beat_received_ = false;
 }
 
@@ -296,7 +311,7 @@ void odrive_node::heartbeat_callback(const can_msgs::msg::Frame::SharedPtr msg){
   uint8_t axis_state = msg->data[4];
   uint8_t procedure_result = msg->data[5];
   bool traj_done_flag = read_le<bool>(msg->data.begin() + 6);
-  
+  heart_beat_received_time_ = std::chrono::system_clock::now();
   if(axis_error_ != 0){
     RCLCPP_ERROR(this->get_logger(),"Axis Error: %d",axis_error_);
     this->get_error();
@@ -333,12 +348,36 @@ void odrive_node::get_error_callback(const can_msgs::msg::Frame::SharedPtr msg){
   if(axis_error_ != 0){
     RCLCPP_ERROR(this->get_logger(),"Axis Error: %d",axis_error_);
     RCLCPP_ERROR(this->get_logger(),"Disarm Reason: %d",disarm_reason);
+    axis_error_code_ = axis_error_;
+    error_code_ = disarm_reason;
+    this->updater_.force_update();
     clear_errors();
     rclcpp::sleep_for(std::chrono::microseconds(1000));
     set_axis_state(AXIS_STATE::CLOSED_LOOP_CONTROL);
 
     // publish Diag Message
   }
+}
+
+void odrive_node::error_diag(diagnostic_updater::DiagnosticStatusWrapper & stat){
+  if(error_code_ != 0){
+    stat.summary(
+      diagnostic_msgs::msg::DiagnosticStatus::ERROR,
+      "Disarm Reason: " + std::to_string(error_code_));
+  }
+  else{
+    stat.summary(
+      diagnostic_msgs::msg::DiagnosticStatus::OK,
+      "No Error");
+  }
+  error_code_ = 0;
+  if(axis_error_code_ != 0){
+    stat.add("Axis Error Code", axis_error_code_);
+  }
+  else{
+    stat.add("Axis Error Code", "No Error");
+  }
+  axis_error_code_ = 0;
 }
 
 void odrive_node::get_error(){
@@ -382,8 +421,8 @@ void odrive_node::get_encoder_estimates_callback(const can_msgs::msg::Frame::Sha
   enc_msg_.pos.data *=  2*M_PI/gear_ratio_;
   enc_msg_.vel.data = read_le<float>(msg->data.begin() + 4);
   enc_msg_.vel.data *= 2*M_PI/gear_ratio_;
-  // enc_msg_.header.stamp = msg->header.stamp;
-  enc_msg_.header.stamp = this->now();
+  enc_msg_.header.stamp = msg->header.stamp;
+  // enc_msg_.header.stamp = this->now();
   // enc_msg_.pos.data = (float) (msg->data[0] | msg->data[1] << 8 | msg->data[2] << 16 | msg->data[3] << 24) / 100.0;
   // enc_msg_.vel.data = (float) (msg->data[4] | msg->data[5] << 8 | msg->data[6] << 16 | msg->data[7] << 24) / 100.0;
   //pub_enc_->publish(enc_msg_);

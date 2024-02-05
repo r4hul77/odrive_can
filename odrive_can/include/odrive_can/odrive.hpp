@@ -27,6 +27,7 @@
 #include "rclcpp_lifecycle/lifecycle_publisher.hpp"
 #include "bondcpp/bond.hpp"
 #include "bond/msg/constants.hpp"
+#include <diagnostic_updater/diagnostic_updater.hpp>
 
 
   enum CMD_IDS:uint32_t{
@@ -154,6 +155,8 @@ class odrive_node: public lc::LifecycleNode{
     controller_limits limits_;
     std::unique_ptr<bond::Bond> bond_{nullptr};
     bool heart_beat_received_;
+    std::chrono::time_point<std::chrono::system_clock> heart_beat_received_time_;
+
 
 
     rclcpp::Service<odrive_interfaces::srv::Reboot>::SharedPtr reboot_srv_;
@@ -170,6 +173,10 @@ class odrive_node: public lc::LifecycleNode{
     float gear_ratio_;
 
     uint8_t sensor_msg_flag_; 
+
+    uint32_t error_code_;
+    uint32_t axis_error_code_;
+    diagnostic_updater::Updater updater_;
 
   public:
    
@@ -276,7 +283,7 @@ class odrive_node: public lc::LifecycleNode{
 
     void get_controller_error_callback(const can_msgs::msg::Frame::SharedPtr msg);
 
-    void sanity_checker();
+    void sanity_checker(diagnostic_updater::DiagnosticStatusWrapper & stat);
 
     void initialize_controller();
 
@@ -285,6 +292,10 @@ class odrive_node: public lc::LifecycleNode{
     void get_torques();
 
     void get_iq();
+
+    void error_diag(diagnostic_updater::DiagnosticStatusWrapper & stat);
+
+    void initialize_diagnostic();
 };
 
 
