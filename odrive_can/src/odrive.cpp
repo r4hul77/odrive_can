@@ -83,13 +83,13 @@ CallbackReturn odrive_node::on_activate(const lc::State & state){
 
 void odrive_node::sensor_sanity_check(){
   int skipped_msgs = 0;
-  while(!sensor_msg_flag_ & 0b111||skipped_msgs>2){
+  while(((sensor_msg_flag_ & 0b111) != 0b111) || (skipped_msgs > 2)){
     sensor_sanity_timer_->reset();
     if(!sensor_msg_flag_ & 0b100){
       get_encoder_estimates();
       RCLCPP_WARN(this->get_logger(), "Didn't Receive Encoder Messages this cycle requesting it");
     }
-    if(!sensor_msg_flag_ & 0b100){
+    if(!sensor_msg_flag_ & 0b010){
       get_iq();
       RCLCPP_WARN(this->get_logger(), "Didn't Receive Iq Messages this cycle requesting it");
     }
@@ -208,15 +208,15 @@ void odrive_node::initialize_controller(){
 void odrive_node::sanity_checker(diagnostic_updater::DiagnosticStatusWrapper & stat){
   auto now = std::chrono::system_clock::now();
 
-  if(std::chrono::duration_cast<std::chrono::milliseconds>(heart_beat_received_time_ - now) < std::chrono::milliseconds(200)){
+  if(std::chrono::duration_cast<std::chrono::milliseconds>(now - heart_beat_received_time_) < std::chrono::milliseconds(200)){
       stat.summary(
       diagnostic_msgs::msg::DiagnosticStatus::OK,
-      "Everything is Fine");
+      "Heart Beat Received");
   }
   else{
     stat.summary(
       diagnostic_msgs::msg::DiagnosticStatus::ERROR,
-      "No Heart Beat");
+      "Check for the Magic Smoke");
   }
 
   heart_beat_received_ = false;
