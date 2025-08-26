@@ -187,6 +187,8 @@ void odrive_node::get_parameters(){
   this->declare_parameter("traj_deaccel_limit", 25.);
   this->declare_parameter("traj_inertia", 25.);
   this->declare_parameter("gear_ratio", 20.);
+  this->declare_parameter("vel_p_gain", 1.25);
+  this->declare_parameter("vel_i_gain", 0.001);
 
   uint8_t placeholder(0);
 
@@ -207,6 +209,11 @@ void odrive_node::get_parameters(){
   limits_.traj_deaccel_limit /= 2*M_PI/gear_ratio_;
   this->get_parameter("traj_inertia",limits_.traj_inertia);
 
+  float vel_p(0), vel_i(0);
+  this->get_parameter("vel_p_gain", vel_p);
+  this->get_parameter("vel_i_gain", vel_i);
+
+
   this->frame_id_ = "odrive" + std::to_string(node_id_);
 
   enc_msg_.header.frame_id = frame_id_;
@@ -214,6 +221,7 @@ void odrive_node::get_parameters(){
   torque_msg_.header.frame_id = frame_id_;
   iq_msg_.header.frame_id = frame_id_;
   temp_msg_.header.frame_id = frame_id_;
+  this->set_vel_gain(vel_p, vel_i);
 }
 
 void odrive_node::initialize_publishers(){
