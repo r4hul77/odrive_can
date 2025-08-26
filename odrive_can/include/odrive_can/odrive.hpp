@@ -296,6 +296,9 @@ class odrive_node: public lc::LifecycleNode{
     void error_diag(diagnostic_updater::DiagnosticStatusWrapper & stat);
 
     void initialize_diagnostic();
+    
+    static std::string disarm_reason_to_string(uint32_t code);
+
 };
 
 

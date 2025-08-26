@@ -4,6 +4,52 @@ odrive_node::odrive_node(const rclcpp::NodeOptions & options):lc::LifecycleNode(
  heart_beat_received_time_ = std::chrono::system_clock::now();
 }
 
+
+struct ErrorEntry { uint32_t bit; const char* name; };
+
+static const ErrorEntry kDisarmReasonTable[] = {
+  {0x00000001u, "INITIALIZING"},
+  {0x00000002u, "SYSTEM_LEVEL"},
+  {0x00000004u, "TIMING_ERROR"},
+  {0x00000008u, "MISSING_ESTIMATE"},
+  {0x00000010u, "BAD_CONFIG"},
+  {0x00000020u, "DRV_FAULT"},
+  {0x00000040u, "MISSING_INPUT"},
+  {0x00000100u, "DC_BUS_OVER_VOLTAGE"},
+  {0x00000200u, "DC_BUS_UNDER_VOLTAGE"},
+  {0x00000400u, "DC_BUS_OVER_CURRENT"},
+  {0x00000800u, "DC_BUS_OVER_REGEN_CURRENT"},
+  {0x00001000u, "CURRENT_LIMIT_VIOLATION"},
+  {0x00002000u, "MOTOR_OVER_TEMP"},
+  {0x00004000u, "INVERTER_OVER_TEMP"},
+  {0x00008000u, "VELOCITY_LIMIT_VIOLATION"},
+  {0x00010000u, "POSITION_LIMIT_VIOLATION"},
+  {0x01000000u, "WATCHDOG_TIMER_EXPIRED"},
+  {0x02000000u, "ESTOP_REQUESTED"},
+  {0x04000000u, "SPINOUT_DETECTED"},
+  {0x08000000u, "BRAKE_RESISTOR_DISARMED"},
+  {0x10000000u, "THERMISTOR_DISCONNECTED"},
+  {0x40000000u, "CALIBRATION_ERROR"},
+};
+
+
+std::string odrive_node::disarm_reason_to_string(uint32_t code) {
+  if (code == 0) return "No error";
+  std::string out;
+  for (const auto& e : kDisarmReasonTable) {
+    if (code & e.bit) {
+      if (!out.empty()) out += " | ";
+      out += e.name;
+      out += " | ";
+    }
+  }
+  if (out.empty()) out = "Unknown error bits: 0x" + [&]{
+    char buf[11]; std::snprintf(buf, sizeof(buf), "%08X", code);
+    return std::string(buf);
+  }();
+  return out;
+}
+
 CallbackReturn odrive_node::on_configure(const lc::State & state){
   RCLCPP_INFO(this->get_logger(),"Configuring");
   get_parameters();
@@ -354,8 +400,7 @@ void odrive_node::get_error_callback(const can_msgs::msg::Frame::SharedPtr msg){
   uint32_t disarm_reason = read_le<uint32_t>(msg->data.begin() + 4);
   
   if(axis_error_ != 0){
-    RCLCPP_ERROR(this->get_logger(),"Axis Error: %d",axis_error_);
-    RCLCPP_ERROR(this->get_logger(),"Disarm Reason: %d",disarm_reason);
+    RCLCPP_ERROR(this->get_logger(),"Axis Error: %d \n Error %s",axis_error_, disarm_reason_to_string(disarm_reason).c_str());
     axis_error_code_ = axis_error_;
     error_code_ = disarm_reason;
     this->updater_.force_update();
@@ -363,7 +408,6 @@ void odrive_node::get_error_callback(const can_msgs::msg::Frame::SharedPtr msg){
     rclcpp::sleep_for(std::chrono::microseconds(1000));
     set_axis_state(AXIS_STATE::CLOSED_LOOP_CONTROL);
 
-    // publish Diag Message
   }
 }
 
@@ -371,7 +415,7 @@ void odrive_node::error_diag(diagnostic_updater::DiagnosticStatusWrapper & stat)
   if(error_code_ != 0){
     stat.summary(
       diagnostic_msgs::msg::DiagnosticStatus::ERROR,
-      "Disarm Reason: " + std::to_string(error_code_));
+      "Disarm Reason: " + disarm_reason_to_string(error_code_));
   }
   else{
     stat.summary(
@@ -741,6 +785,9 @@ void odrive_node::get_iq(){
 
 void odrive_node::get_controller_error_callback(const can_msgs::msg::Frame::SharedPtr msg){
   uint32_t controller_error = read_le<uint32_t>(msg->data.begin());
+  std::string error_string = "";
+
+  RCLCPP_INFO(this->get_logger(),"Controller Error: %d",controller_error);
   if(controller_error != 0){
     RCLCPP_ERROR(this->get_logger(),"Controller Error: %d",controller_error);
   }
